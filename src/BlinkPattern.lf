@@ -1,0 +1,73 @@
+/**
+ * Pattern: 1, 2, 3, 4 blinks with 1s delay between patterns
+ * Timer fixed at 250ms. We implement the 1s pause using a tick counter.
+ */
+target C {
+  platform: {
+    name: "rp2040",
+    board: "pololu_3pi_2040_robot"
+  },
+  single-threaded: true
+}
+
+preamble {=
+  #include <pico/stdlib.h>
+  #include <hardware/gpio.h>
+=}
+
+main reactor {
+  // Fixed tick: 250ms
+  timer t(0, 250 ms)
+
+  state led_on: bool = false
+  state blink_count: int = 0
+  state target_blinks: int = 1
+
+  // Pause handling: 1s = 4 ticks of 250ms
+  state in_pause: bool = false
+  state pause_ticks_left: int = 0
+
+  reaction(startup) {=
+    gpio_init(PICO_DEFAULT_LED_PIN);
+    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
+    gpio_put(PICO_DEFAULT_LED_PIN, 0);
+  =}
+
+  reaction(t) {=
+    // If we are in the 1-second pause, just count down ticks
+    if (self->in_pause) {
+      self->pause_ticks_left--;
+
+      if (self->pause_ticks_left <= 0) {
+        // End pause -> next pattern
+        self->in_pause = false;
+        self->blink_count = 0;
+        self->target_blinks = (self->target_blinks % 4) + 1;
+
+        // Make sure LED is OFF before starting next pattern
+        self->led_on = false;
+        gpio_put(PICO_DEFAULT_LED_PIN, 0);
+      }
+      return;
+    }
+
+    // Normal blinking: toggle each tick (250ms)
+    self->led_on = !self->led_on;
+    gpio_put(PICO_DEFAULT_LED_PIN, self->led_on);
+
+    // Count one blink when we complete an ON->OFF cycle
+    if (!self->led_on) {
+      self->blink_count++;
+
+      if (self->blink_count >= self->target_blinks) {
+        // Finished current pattern -> enter 1-second pause
+        self->in_pause = true;
+        self->pause_ticks_left = 4; // 4 * 250ms = 1s
+
+        // Ensure LED is OFF during pause
+        self->led_on = false;
+        gpio_put(PICO_DEFAULT_LED_PIN, 0);
+      }
+    }
+  =}
+}
